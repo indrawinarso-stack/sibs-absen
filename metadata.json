@@ -1,0 +1,6 @@
+{
+  "name": "SIBS-Mart Absensi Karyawan",
+  "description": "Aplikasi absensi karyawan SIBS-Mart (Mini Market Pesantren Situwangi) dengan Check-In/Check-Out real-time, filter tanggal dan bulanan, serta ekspor CSV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
