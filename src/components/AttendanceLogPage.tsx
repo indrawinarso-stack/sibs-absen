@@ -7,8 +7,8 @@ import {
   ClipboardList,
   Download,
   FileText,
-  KeyRound,
   RotateCcw,
+  Settings2,
   ShieldAlert,
   Trash2,
   Users,
@@ -33,7 +33,7 @@ interface AttendanceLogPageProps {
   logs: AttendanceLog[];
   employees: string[];
   isUsingDefaultPin: boolean;
-  onDeleteLog: (id: string) => void;
+  onDeleteLog: (id: string) => Promise<void>;
   onNavigateToAbsensi: () => void;
   onOpenEmployeeModal: () => void;
   onOpenChangePinModal: () => void;
@@ -185,7 +185,7 @@ export function AttendanceLogPage({
     }
     if (log.status === 'Ijin') {
       return (
-        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-700">
           <FileText className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span>Ijin</span>
         </div>
@@ -193,7 +193,7 @@ export function AttendanceLogPage({
     }
     if (log.status === 'Libur') {
       return (
-        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700">
           <CalendarDays className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span>Libur</span>
         </div>
@@ -218,8 +218,8 @@ export function AttendanceLogPage({
               aria-hidden="true"
             />
             <span>
-              Anda masih menggunakan PIN bawaan Admin. Demi keamanan laporan,
-              segera ganti dengan PIN pribadi Anda.
+              Anda masih menggunakan PIN bawaan Admin. Demi keamanan laporan di
+              semua perangkat, segera ganti dengan PIN pribadi Anda.
             </span>
           </div>
           <button
@@ -235,10 +235,10 @@ export function AttendanceLogPage({
       {/* Page Title & Admin Actions */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-blue-950 tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-bold text-emerald-950 tracking-tight">
             Dashboard Laporan Admin
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+          <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
             Menampilkan data kehadiran, ijin & libur untuk {periodLabel}
           </p>
         </div>
@@ -247,28 +247,31 @@ export function AttendanceLogPage({
           <button
             type="button"
             onClick={onOpenEmployeeModal}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-950 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
           >
-            <Users className="w-4 h-4 text-blue-700 shrink-0" aria-hidden="true" />
+            <Users
+              className="w-4 h-4 text-emerald-700 shrink-0"
+              aria-hidden="true"
+            />
             <span>Kelola Karyawan</span>
           </button>
 
           <button
             type="button"
             onClick={onOpenChangePinModal}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-950 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
           >
-            <KeyRound
-              className="w-4 h-4 text-blue-700 shrink-0"
+            <Settings2
+              className="w-4 h-4 text-emerald-700 shrink-0"
               aria-hidden="true"
             />
-            <span>Ubah PIN</span>
+            <span>Pengaturan & PIN</span>
           </button>
 
           <button
             type="button"
             onClick={handleExportCsv}
-            className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs sm:text-sm font-medium flex items-center justify-center gap-2 transition-colors shadow-sm shadow-blue-900/10 whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+            className="min-h-[44px] px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-medium flex items-center justify-center gap-2 transition-colors shadow-sm shadow-emerald-900/15 whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
             <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>
@@ -282,35 +285,35 @@ export function AttendanceLogPage({
 
       {/* Summary Metrics Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="bg-white border border-emerald-200/80 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">Total Data</div>
           <div className="font-mono tabular-nums text-2xl font-bold text-slate-900 mt-1">
             {summary.total}
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="bg-white border border-emerald-200/80 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">Tepat Waktu</div>
           <div className="font-mono tabular-nums text-2xl font-bold text-emerald-700 mt-1">
             {summary.onTime}
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="bg-white border border-emerald-200/80 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">Terlambat</div>
           <div className="font-mono tabular-nums text-2xl font-bold text-amber-700 mt-1">
             {summary.late}
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="bg-white border border-emerald-200/80 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">Ijin / Libur</div>
-          <div className="font-mono tabular-nums text-2xl font-bold text-indigo-700 mt-1">
+          <div className="font-mono tabular-nums text-2xl font-bold text-teal-700 mt-1">
             {summary.leave}
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-4 col-span-2 sm:col-span-1">
+        <div className="bg-white border border-emerald-200/80 rounded-xl p-4 col-span-2 sm:col-span-1">
           <div className="text-xs font-medium text-slate-500">
             Belum Check-Out
           </div>
-          <div className="font-mono tabular-nums text-2xl font-bold text-blue-700 mt-1">
+          <div className="font-mono tabular-nums text-2xl font-bold text-sky-700 mt-1">
             {summary.notCheckedOut}
           </div>
         </div>
@@ -319,21 +322,21 @@ export function AttendanceLogPage({
       {/* Filter Toolbar */}
       <section
         aria-label="Filter riwayat kehadiran"
-        className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4"
+        className="bg-white border border-emerald-200/80 rounded-2xl p-4 sm:p-5 space-y-4"
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div
             role="group"
             aria-label="Mode periode filter"
-            className="inline-flex items-center bg-slate-100 p-1 rounded-xl self-start"
+            className="inline-flex items-center bg-emerald-50/90 border border-emerald-200/70 p-1 rounded-xl self-start"
           >
             <button
               type="button"
               onClick={() => setFilterMode('date')}
               className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                 filterMode === 'date'
-                  ? 'bg-white text-blue-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-emerald-900/75 hover:text-emerald-950'
               }`}
             >
               Per Tanggal
@@ -343,8 +346,8 @@ export function AttendanceLogPage({
               onClick={() => setFilterMode('month')}
               className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                 filterMode === 'month'
-                  ? 'bg-white text-blue-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-emerald-900/75 hover:text-emerald-950'
               }`}
             >
               Rekap Bulanan
@@ -354,8 +357,8 @@ export function AttendanceLogPage({
               onClick={() => setFilterMode('all')}
               className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                 filterMode === 'all'
-                  ? 'bg-white text-blue-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-emerald-900/75 hover:text-emerald-950'
               }`}
             >
               Semua Data
@@ -365,7 +368,7 @@ export function AttendanceLogPage({
           <button
             type="button"
             onClick={handleResetFilters}
-            className="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-blue-800 hover:bg-blue-50 inline-flex items-center gap-1.5 self-start md:self-auto transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50 inline-flex items-center gap-1.5 self-start md:self-auto transition-colors whitespace-nowrap shrink-0"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Reset ke Hari Ini</span>
@@ -386,7 +389,7 @@ export function AttendanceLogPage({
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
               />
             </div>
           )}
@@ -404,7 +407,7 @@ export function AttendanceLogPage({
                 type="month"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
               />
             </div>
           )}
@@ -414,8 +417,11 @@ export function AttendanceLogPage({
               <span className="block text-xs font-semibold text-slate-600">
                 Periode
               </span>
-              <div className="min-h-[44px] px-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-600 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-400" aria-hidden="true" />
+              <div className="min-h-[44px] px-3.5 rounded-xl border border-emerald-200/70 bg-emerald-50/50 text-sm text-slate-600 flex items-center gap-2">
+                <Calendar
+                  className="w-4 h-4 text-emerald-700"
+                  aria-hidden="true"
+                />
                 <span>Seluruh catatan tersimpan</span>
               </div>
             </div>
@@ -432,7 +438,7 @@ export function AttendanceLogPage({
               id="filter-employee"
               value={employeeFilter}
               onChange={(e) => setEmployeeFilter(e.target.value)}
-              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
             >
               <option value="all">Semua Karyawan</option>
               {filterEmployeeOptions.map((name) => (
@@ -456,7 +462,7 @@ export function AttendanceLogPage({
               onChange={(e) =>
                 setShiftFilter(e.target.value as 'all' | LogShiftId)
               }
-              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
             >
               <option value="all">Semua Shift</option>
               <option value="pagi">Pagi (09:00 - 17:00)</option>
@@ -478,7 +484,7 @@ export function AttendanceLogPage({
               onChange={(e) =>
                 setStatusFilter(e.target.value as 'all' | AttendanceStatus)
               }
-              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+              className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
             >
               <option value="all">Semua Status</option>
               <option value="Tepat Waktu">Tepat Waktu</option>
@@ -493,12 +499,12 @@ export function AttendanceLogPage({
       {/* Attendance History Table / Empty State */}
       <section
         aria-label="Tabel riwayat kehadiran"
-        className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
+        className="bg-white border border-emerald-200/80 rounded-2xl overflow-hidden shadow-sm shadow-emerald-950/5"
       >
         {filteredLogs.length === 0 ? (
           <div className="py-14 px-6 text-center space-y-3">
             <ClipboardList
-              className="w-10 h-10 text-slate-300 mx-auto"
+              className="w-10 h-10 text-emerald-200 mx-auto"
               aria-hidden="true"
             />
             <div className="space-y-1">
@@ -514,7 +520,7 @@ export function AttendanceLogPage({
               <button
                 type="button"
                 onClick={onNavigateToAbsensi}
-                className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-sm font-medium transition-colors whitespace-nowrap"
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium transition-colors whitespace-nowrap"
               >
                 Buka Halaman Absensi
               </button>
@@ -538,7 +544,7 @@ export function AttendanceLogPage({
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-600">
+                  <tr className="border-b border-emerald-200 bg-emerald-50/70 text-xs font-semibold text-emerald-950">
                     <th className="py-3.5 px-4 whitespace-nowrap">Tanggal</th>
                     <th className="py-3.5 px-4 whitespace-nowrap">Nama</th>
                     <th className="py-3.5 px-4 whitespace-nowrap">Shift</th>
@@ -551,7 +557,7 @@ export function AttendanceLogPage({
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
+                <tbody className="divide-y divide-emerald-100/70 text-sm">
                   {filteredLogs.map((log) => {
                     const shift = getShiftDisplay(log.shift);
                     const isConfirming = confirmDeleteId === log.id;
@@ -559,7 +565,7 @@ export function AttendanceLogPage({
                     return (
                       <tr
                         key={log.id}
-                        className="hover:bg-blue-50/40 transition-colors"
+                        className="hover:bg-emerald-50/50 transition-colors"
                       >
                         <td className="py-3.5 px-4 font-mono tabular-nums text-xs text-slate-600 whitespace-nowrap">
                           {log.date}
@@ -607,7 +613,7 @@ export function AttendanceLogPage({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  onDeleteLog(log.id);
+                                  void onDeleteLog(log.id);
                                   setConfirmDeleteId(null);
                                 }}
                                 className="min-h-[34px] px-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
@@ -641,7 +647,7 @@ export function AttendanceLogPage({
               </table>
             </div>
 
-            <ul className="md:hidden divide-y divide-slate-200">
+            <ul className="md:hidden divide-y divide-emerald-100">
               {filteredLogs.map((log) => {
                 const shift = getShiftDisplay(log.shift);
                 const isLeave =
@@ -671,7 +677,7 @@ export function AttendanceLogPage({
 
                     {!isLeave && (
                       <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
-                        <div className="bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+                        <div className="bg-emerald-50/50 rounded-lg px-3 py-2 border border-emerald-100">
                           <span className="text-slate-500 block">
                             Jam Masuk
                           </span>
@@ -679,7 +685,7 @@ export function AttendanceLogPage({
                             {log.checkInTime ?? '—'}
                           </span>
                         </div>
-                        <div className="bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+                        <div className="bg-emerald-50/50 rounded-lg px-3 py-2 border border-emerald-100">
                           <span className="text-slate-500 block">
                             Jam Pulang
                           </span>
@@ -700,7 +706,7 @@ export function AttendanceLogPage({
                           <button
                             type="button"
                             onClick={() => {
-                              onDeleteLog(log.id);
+                              void onDeleteLog(log.id);
                               setConfirmDeleteId(null);
                             }}
                             className="min-h-[36px] px-3 rounded-lg bg-red-600 text-white text-xs font-medium"

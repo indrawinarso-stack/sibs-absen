@@ -1,9 +1,8 @@
 const ADMIN_PIN_HASH_KEY = 'sibs_mart_admin_pin_hash_v1';
 const ADMIN_SESSION_KEY = 'sibs_mart_admin_session_v1';
-const DEFAULT_ADMIN_PIN = '123456';
+export const DEFAULT_ADMIN_PIN = '123456';
 
 function fallbackHash(input: string): string {
-  // Deterministic salted FNV-1a-like fallback for non-HTTPS local contexts without crypto.subtle
   const salted = `sibs-mart-pin:${input}`;
   let h1 = 0x811c9dc5;
   let h2 = 0x9e3779b9;
@@ -32,56 +31,43 @@ export async function hashPin(pin: string): Promise<string> {
   return fallbackHash(pin);
 }
 
-async function getStoredPinHash(): Promise<string> {
+export async function getDefaultPinHash(): Promise<string> {
+  return hashPin(DEFAULT_ADMIN_PIN);
+}
+
+export function getCachedPinHash(): string | null {
   try {
-    const stored = localStorage.getItem(ADMIN_PIN_HASH_KEY);
-    if (stored) return stored;
-    const defaultHash = await hashPin(DEFAULT_ADMIN_PIN);
-    localStorage.setItem(ADMIN_PIN_HASH_KEY, defaultHash);
-    return defaultHash;
+    return localStorage.getItem(ADMIN_PIN_HASH_KEY);
   } catch {
-    return hashPin(DEFAULT_ADMIN_PIN);
+    return null;
   }
 }
 
-export async function verifyAdminPin(pin: string): Promise<boolean> {
+export function saveCachedPinHash(pinHash: string): void {
+  try {
+    localStorage.setItem(ADMIN_PIN_HASH_KEY, pinHash);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export async function verifyAdminPin(
+  pin: string,
+  activeHash: string | null
+): Promise<boolean> {
   const trimmed = pin.trim();
   if (!trimmed) return false;
-  const storedHash = await getStoredPinHash();
   const candidateHash = await hashPin(trimmed);
-  return candidateHash === storedHash;
+  const targetHash = activeHash || (await getDefaultPinHash());
+  return candidateHash === targetHash;
 }
 
-export async function isUsingDefaultAdminPin(): Promise<boolean> {
-  const storedHash = await getStoredPinHash();
-  const defaultHash = await hashPin(DEFAULT_ADMIN_PIN);
-  return storedHash === defaultHash;
-}
-
-export async function changeAdminPin(
-  currentPin: string,
-  newPin: string
-): Promise<{ ok: boolean; error?: string }> {
-  const validCurrent = await verifyAdminPin(currentPin);
-  if (!validCurrent) {
-    return { ok: false, error: 'PIN Admin saat ini tidak sesuai.' };
-  }
-
-  const trimmedNew = newPin.trim();
-  if (trimmedNew.length < 4) {
-    return { ok: false, error: 'PIN baru minimal 4 karakter.' };
-  }
-  if (trimmedNew.length > 24) {
-    return { ok: false, error: 'PIN baru maksimal 24 karakter.' };
-  }
-
-  try {
-    const newHash = await hashPin(trimmedNew);
-    localStorage.setItem(ADMIN_PIN_HASH_KEY, newHash);
-    return { ok: true };
-  } catch {
-    return { ok: false, error: 'Gagal menyimpan PIN baru ke browser.' };
-  }
+export async function isHashDefaultAdminPin(
+  activeHash: string | null
+): Promise<boolean> {
+  if (!activeHash) return true;
+  const defaultHash = await getDefaultPinHash();
+  return activeHash === defaultHash;
 }
 
 export function loadAdminSession(): boolean {

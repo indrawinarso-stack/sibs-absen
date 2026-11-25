@@ -1,0 +1,169 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'amanstore231@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll(['name', 'createdAt'])
+        && data.keys().hasOnly(['name', 'createdAt'])
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 40
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTimeOrEmpty(val) {
+      return val is string
+        && val.size() <= 5
+        && (val == '' || val.matches('^\\d{2}:\\d{2}$'));
+    }
+
+    function isValidAttendanceLog(data) {
+      return data.keys().hasAll([
+          'date',
+          'employeeName',
+          'shift',
+          'checkInTime',
+          'checkOutTime',
+          'status',
+          'lateMinutes',
+          'note',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'date',
+          'employeeName',
+          'shift',
+          'checkInTime',
+          'checkOutTime',
+          'status',
+          'lateMinutes',
+          'note',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.date is string
+        && data.date.size() == 10
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.employeeName is string
+        && data.employeeName.size() >= 1
+        && data.employeeName.size() <= 40
+        && data.shift in ['pagi', 'siang', 'seharian']
+        && isValidTimeOrEmpty(data.checkInTime)
+        && isValidTimeOrEmpty(data.checkOutTime)
+        && data.status in ['Tepat Waktu', 'Terlambat', 'Ijin', 'Libur']
+        && data.lateMinutes is int
+        && data.lateMinutes >= 0
+        && data.lateMinutes <= 1440
+        && data.note is string
+        && data.note.size() <= 160
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStoreSettings(data) {
+      return data.keys().hasAll(['storeName', 'adminPinHash', 'graceMinutes', 'updatedAt'])
+        && data.keys().hasOnly(['storeName', 'adminPinHash', 'graceMinutes', 'updatedAt'])
+        && data.storeName is string
+        && data.storeName.size() >= 1
+        && data.storeName.size() <= 60
+        && data.adminPinHash is string
+        && data.adminPinHash.size() >= 12
+        && data.adminPinHash.size() <= 128
+        && data.graceMinutes is int
+        && data.graceMinutes >= 0
+        && data.graceMinutes <= 120
+        && data.updatedAt is timestamp;
+    }
+
+    // Active employee roster (non-PII display names for shared kiosk dropdown)
+    match /employees/{employeeId} {
+      allow get: if isValidId(employeeId);
+      allow list: if resource.data.name >= '' && request.query.limit <= 200;
+      allow create: if isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(employeeId) && (isAdmin() || resource.data.name is string);
+    }
+
+    // Shared attendance & leave logs across devices
+    match /attendance_logs/{logId} {
+      allow get: if isValidId(logId);
+      allow list: if resource.data.date >= '2000-01-01' && request.query.limit <= 2000;
+      allow create: if isValidId(logId)
+        && isValidAttendanceLog(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(logId)
+        && isValidAttendanceLog(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().status in ['Tepat Waktu', 'Terlambat']
+            && existing().checkOutTime == ''
+            && incoming().date == existing().date
+            && incoming().employeeName == existing().employeeName
+            && incoming().shift == existing().shift
+            && incoming().checkInTime == existing().checkInTime
+            && incoming().status == existing().status
+            && incoming().lateMinutes == existing().lateMinutes
+            && incoming().checkOutTime != ''
+            && incoming().diff(existing()).affectedKeys().hasOnly(['checkOutTime', 'note', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(logId) && (isAdmin() || resource.data.date is string);
+    }
+
+    // Shared store settings (single document 'store')
+    match /settings/{settingId} {
+      allow get: if settingId == 'store';
+      allow list: if false;
+      allow create: if settingId == 'store'
+        && isValidStoreSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if settingId == 'store'
+        && isValidStoreSettings(incoming())
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['adminPinHash', 'storeName', 'graceMinutes', 'updatedAt'])
+        );
+      allow delete: if false;
+    }
+
+    // Connection check document used at startup
+    match /test/connection {
+      allow get: if request.auth == null || request.auth != null;
+      allow list, write: if false;
+    }
+  }
+}

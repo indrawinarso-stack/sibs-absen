@@ -11,7 +11,7 @@ interface AdminLoginFormProps {
 export function AdminLoginForm({
   onSubmitPin,
   title = 'Akses Khusus Admin',
-  subtitle = 'Masukkan PIN Admin SIBS-Mart untuk membuka laporan kehadiran dan ekspor data.',
+  subtitle = 'Masukkan PIN Admin SIBS-Mart untuk membuka laporan kehadiran dan pengaturan toko.',
   submitLabel = 'Masuk sebagai Admin',
 }: AdminLoginFormProps) {
   const [pin, setPin] = useState('');
@@ -49,12 +49,12 @@ export function AdminLoginForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="flex items-start gap-3">
-        <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+        <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center shrink-0">
           <Lock className="w-5 h-5" aria-hidden="true" />
         </div>
         <div>
-          <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5 leading-relaxed">
+          <h2 className="text-lg font-bold text-emerald-950">{title}</h2>
+          <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-relaxed">
             {subtitle}
           </p>
         </div>
@@ -79,7 +79,7 @@ export function AdminLoginForm({
               if (error) setError(null);
             }}
             placeholder="Masukkan PIN Admin..."
-            className="w-full min-h-[48px] pl-4 pr-12 rounded-xl border border-slate-300 bg-white text-base font-mono tracking-wider text-slate-900 placeholder:font-sans placeholder:tracking-normal placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+            className="w-full min-h-[48px] pl-4 pr-12 rounded-xl border border-slate-300 bg-white text-base font-mono tracking-wider text-slate-900 placeholder:font-sans placeholder:tracking-normal placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
           />
           <button
             type="button"
@@ -104,7 +104,7 @@ export function AdminLoginForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+        className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
       >
         <ShieldCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
         <span>{isSubmitting ? 'Memeriksa...' : submitLabel}</span>
@@ -141,20 +141,20 @@ export function AdminLoginModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-xs p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-emerald-950/45 backdrop-blur-xs p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Login Admin SIBS-Mart"
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-xl p-5 sm:p-6 relative"
+        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl border border-emerald-200 shadow-xl p-5 sm:p-6 relative"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          className="absolute top-4 right-4 min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center text-slate-400 hover:text-emerald-950 hover:bg-emerald-50 transition-colors"
           aria-label="Tutup login admin"
         >
           <X className="w-5 h-5" />

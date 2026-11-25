@@ -2,13 +2,18 @@ import {
   AttendanceLog,
   AttendanceStatus,
   DEFAULT_EMPLOYEES,
+  DEFAULT_GRACE_MINUTES,
+  DEFAULT_STORE_NAME,
+  EmployeeItem,
   LogShiftId,
   SHIFT_CONFIG,
   ShiftId,
+  StoreSettings,
 } from '../types/attendance';
 
 const EMPLOYEES_STORAGE_KEY = 'sibs_mart_employees_v1';
 const LOGS_STORAGE_KEY = 'sibs_mart_attendance_logs_v1';
+const SETTINGS_STORAGE_KEY = 'sibs_mart_settings_v1';
 
 export const SIBS_LOGO_PATH = `${import.meta.env.BASE_URL}assets/aistudio/logo_SIBS-mart_07e37887.jpeg`;
 
@@ -65,7 +70,10 @@ export function getLocalMonthString(date: Date = new Date()): string {
   return `${year}-${month}`;
 }
 
-export function getDatesInRange(startDateStr: string, endDateStr: string): string[] {
+export function getDatesInRange(
+  startDateStr: string,
+  endDateStr: string
+): string[] {
   const [sy, sm, sd] = startDateStr.split('-').map(Number);
   const [ey, em, ed] = endDateStr.split('-').map(Number);
   if ([sy, sm, sd, ey, em, ed].some(Number.isNaN)) {
@@ -79,7 +87,6 @@ export function getDatesInRange(startDateStr: string, endDateStr: string): strin
 
   const dates: string[] = [];
   const cursor = new Date(start);
-  // Cap at 60 days per submission to prevent accidental massive loops
   let guard = 0;
   while (cursor <= end && guard < 60) {
     dates.push(getLocalDateString(cursor));
@@ -87,6 +94,17 @@ export function getDatesInRange(startDateStr: string, endDateStr: string): strin
     guard += 1;
   }
   return dates;
+}
+
+export function getGraceCutoffLabel(
+  shiftId: ShiftId,
+  graceMinutes: number = DEFAULT_GRACE_MINUTES
+): string {
+  const shift = SHIFT_CONFIG[shiftId];
+  const total = shift.startHour * 60 + shift.startMinute + graceMinutes;
+  const h = String(Math.floor(total / 60) % 24).padStart(2, '0');
+  const m = String(total % 60).padStart(2, '0');
+  return `${h}:${m}`;
 }
 
 export function getShiftDisplay(shift: LogShiftId): {
@@ -154,12 +172,13 @@ export function formatIndonesianMonth(yyyyMm: string): string {
 
 export function calculateCheckInStatus(
   now: Date,
-  shiftId: ShiftId
+  shiftId: ShiftId,
+  graceMinutes: number = DEFAULT_GRACE_MINUTES
 ): { status: AttendanceStatus; lateMinutes: number } {
   const shift = SHIFT_CONFIG[shiftId];
   const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
   const shiftStartMinutes = shift.startHour * 60 + shift.startMinute;
-  const graceCutoffMinutes = shiftStartMinutes + shift.graceMinutes;
+  const graceCutoffMinutes = shiftStartMinutes + graceMinutes;
 
   if (currentTotalMinutes > graceCutoffMinutes) {
     return {
@@ -178,10 +197,6 @@ export function loadEmployees(): string[] {
   try {
     const raw = localStorage.getItem(EMPLOYEES_STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(
-        EMPLOYEES_STORAGE_KEY,
-        JSON.stringify(DEFAULT_EMPLOYEES)
-      );
       return [...DEFAULT_EMPLOYEES];
     }
     const parsed = JSON.parse(raw);
@@ -193,9 +208,18 @@ export function loadEmployees(): string[] {
       return cleaned;
     }
   } catch {
-    // Fall back to defaults if localStorage is unavailable or malformed
+    // Fall back gracefully
   }
   return [...DEFAULT_EMPLOYEES];
+}
+
+export function loadCachedEmployeeItems(): EmployeeItem[] {
+  const names = loadEmployees();
+  return names.map((name, idx) => ({
+    id: `local_${idx}_${name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'emp'}`,
+    name,
+    createdAt: idx,
+  }));
 }
 
 export function saveEmployees(employees: string[]): void {
@@ -238,6 +262,29 @@ export function saveAttendanceLogs(logs: AttendanceLog[]): void {
   } catch {
     // Ignore storage quota errors gracefully
   }
+}
+
+export function loadCachedSettings(): Partial<StoreSettings> {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveCachedSettings(settings: StoreSettings): void {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function getDefaultStoreName(): string {
+  return DEFAULT_STORE_NAME;
 }
 
 function escapeCsvCell(value: string): string {

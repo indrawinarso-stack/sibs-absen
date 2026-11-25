@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "An active SIBS-Mart store employee selectable on the attendance form.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name of the employee.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the employee was added."
+        }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "AttendanceLog": {
+      "title": "AttendanceLog",
+      "description": "A daily check-in/check-out or leave (Ijin/Libur) record for an employee.",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Local date in YYYY-MM-DD format.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "minLength": 10,
+          "maxLength": 10
+        },
+        "employeeName": {
+          "type": "string",
+          "description": "Employee name at the time of recording.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "shift": {
+          "type": "string",
+          "enum": ["pagi", "siang", "seharian"],
+          "description": "Shift identifier."
+        },
+        "checkInTime": {
+          "type": "string",
+          "description": "Check-in time in HH:mm format or empty string for leave.",
+          "maxLength": 5
+        },
+        "checkOutTime": {
+          "type": "string",
+          "description": "Check-out time in HH:mm format or empty string if not checked out.",
+          "maxLength": 5
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Tepat Waktu", "Terlambat", "Ijin", "Libur"],
+          "description": "Attendance or leave status."
+        },
+        "lateMinutes": {
+          "type": "integer",
+          "description": "Minutes past shift start if late, otherwise 0."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional note or leave reason.",
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the log was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the log was last updated."
+        }
+      },
+      "required": [
+        "date",
+        "employeeName",
+        "shift",
+        "checkInTime",
+        "checkOutTime",
+        "status",
+        "lateMinutes",
+        "note",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Shared store settings synced across all devices, including Admin PIN hash and shift grace minutes.",
+      "type": "object",
+      "properties": {
+        "storeName": {
+          "type": "string",
+          "description": "Display name of the store.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "adminPinHash": {
+          "type": "string",
+          "description": "Salted SHA-256 hash of the Admin PIN.",
+          "minLength": 12,
+          "maxLength": 128
+        },
+        "graceMinutes": {
+          "type": "integer",
+          "description": "Late tolerance minutes after shift start."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last settings update."
+        }
+      },
+      "required": ["storeName", "adminPinHash", "graceMinutes", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Active employee names synchronized across all kiosk and phone devices."
+    },
+    "/attendance_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AttendanceLog" },
+      "description": "Real-time employee check-in, check-out, and leave (Ijin/Libur) records."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store-wide configuration document (store) synchronized across devices."
+    }
+  }
+}

@@ -25,6 +25,7 @@ import {
   formatIndonesianFullDate,
   formatTimeHHMM,
   formatTimeHHMMSS,
+  getGraceCutoffLabel,
   getLocalDateString,
   getShiftDisplay,
   SIBS_LOGO_PATH,
@@ -43,15 +44,16 @@ export interface LeaveSubmissionPayload {
 interface AttendancePageProps {
   now: Date;
   isAdmin: boolean;
+  graceMinutes: number;
   employees: string[];
   selectedEmployee: string;
   onSelectEmployee: (name: string) => void;
   selectedShift: ShiftId;
   onSelectShift: (shift: ShiftId) => void;
   logs: AttendanceLog[];
-  onCheckIn: (note: string) => boolean;
-  onCheckOut: (note: string) => boolean;
-  onSubmitLeave: (payload: LeaveSubmissionPayload) => boolean;
+  onCheckIn: (note: string) => Promise<boolean>;
+  onCheckOut: (note: string) => Promise<boolean>;
+  onSubmitLeave: (payload: LeaveSubmissionPayload) => Promise<boolean>;
   onOpenEmployeeModal: () => void;
   onNavigateToLog: () => void;
 }
@@ -59,6 +61,7 @@ interface AttendancePageProps {
 export function AttendancePage({
   now,
   isAdmin,
+  graceMinutes,
   employees,
   selectedEmployee,
   onSelectEmployee,
@@ -76,6 +79,7 @@ export function AttendancePage({
   const [formMode, setFormMode] = useState<FormMode>('attendance');
   const [note, setNote] = useState('');
   const [logoError, setLogoError] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Leave / Permission state
   const [leaveType, setLeaveType] = useState<LeaveType>('Ijin');
@@ -136,29 +140,38 @@ export function AttendancePage({
     [todayLogs, selectedEmployee]
   );
 
-  const handleCheckInClick = () => {
-    const success = onCheckIn(note);
+  const handleCheckInClick = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    const success = await onCheckIn(note);
+    setIsSubmitting(false);
     if (success) {
       setNote('');
     }
   };
 
-  const handleCheckOutClick = () => {
-    const success = onCheckOut(note);
+  const handleCheckOutClick = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    const success = await onCheckOut(note);
+    setIsSubmitting(false);
     if (success) {
       setNote('');
     }
   };
 
-  const handleLeaveSubmit = (event: FormEvent) => {
+  const handleLeaveSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const success = onSubmitLeave({
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    const success = await onSubmitLeave({
       leaveType,
       startDate: leaveStartDate,
       endDate: leaveEndDate,
       shift: leaveShift,
       note: leaveNote,
     });
+    setIsSubmitting(false);
     if (success) {
       setLeaveNote('');
     }
@@ -178,10 +191,10 @@ export function AttendancePage({
       {/* Left Column: Primary Check-In / Check-Out & Leave Request Workspace */}
       <section
         aria-label="Formulir absensi karyawan"
-        className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-5 sm:p-8 space-y-6"
+        className="lg:col-span-7 bg-white border border-emerald-200/80 shadow-sm shadow-emerald-950/5 rounded-2xl p-5 sm:p-8 space-y-6"
       >
         {/* Store Identity & Live Digital Clock */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-emerald-100">
           <div className="flex items-center gap-3.5">
             {!logoError ? (
               <img
@@ -189,28 +202,28 @@ export function AttendancePage({
                 alt="Logo SIBS-Mart Mini Market Pesantren Situwangi"
                 referrerPolicy="no-referrer"
                 onError={() => setLogoError(true)}
-                className="h-14 w-14 sm:h-16 sm:w-16 object-contain rounded-xl border border-slate-200 bg-white p-1 shrink-0"
+                className="h-14 w-14 sm:h-16 sm:w-16 object-contain rounded-xl border border-emerald-200 bg-white p-1 shrink-0"
               />
             ) : (
-              <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-xl bg-blue-700 text-white font-display font-bold text-lg flex items-center justify-center shrink-0">
+              <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-xl bg-emerald-700 text-white font-display font-bold text-lg flex items-center justify-center shrink-0">
                 SM
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold text-blue-950 tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-bold text-emerald-950 tracking-tight">
                 Absensi SIBS-Mart
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
                 Mini Market Pesantren Situwangi
               </p>
             </div>
           </div>
 
-          <div className="sm:text-right bg-blue-50/70 sm:bg-transparent px-4 py-3 sm:p-0 rounded-xl border border-blue-100 sm:border-0">
-            <div className="font-mono tabular-nums text-2xl sm:text-3xl font-semibold text-blue-800 tracking-tight">
+          <div className="sm:text-right bg-gradient-to-br from-emerald-50 to-teal-50/70 px-4 py-3 sm:px-4 sm:py-2.5 rounded-xl border border-emerald-200/80">
+            <div className="font-mono tabular-nums text-2xl sm:text-3xl font-semibold text-emerald-800 tracking-tight">
               {currentHHMMSS}
             </div>
-            <div className="text-xs sm:text-sm text-slate-600 mt-0.5">
+            <div className="text-xs sm:text-sm text-emerald-900/75 mt-0.5">
               {fullDateLabel}
             </div>
           </div>
@@ -220,7 +233,7 @@ export function AttendancePage({
         <div
           role="tablist"
           aria-label="Pilih jenis formulir"
-          className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl"
+          className="grid grid-cols-2 gap-1.5 bg-emerald-50/80 border border-emerald-200/70 p-1 rounded-xl"
         >
           <button
             type="button"
@@ -229,8 +242,8 @@ export function AttendancePage({
             onClick={() => setFormMode('attendance')}
             className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap ${
               formMode === 'attendance'
-                ? 'bg-white text-blue-800 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-emerald-900/75 hover:text-emerald-950'
             }`}
           >
             <Clock className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -244,8 +257,8 @@ export function AttendancePage({
             onClick={() => setFormMode('leave')}
             className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap ${
               formMode === 'leave'
-                ? 'bg-white text-blue-800 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-emerald-900/75 hover:text-emerald-950'
             }`}
           >
             <CalendarDays className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -265,7 +278,7 @@ export function AttendancePage({
             <button
               type="button"
               onClick={onOpenEmployeeModal}
-              className="text-xs font-medium text-blue-700 hover:text-blue-900 flex items-center gap-1 py-1 px-2 rounded-lg hover:bg-blue-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              className="text-xs font-medium text-emerald-700 hover:text-emerald-900 flex items-center gap-1 py-1 px-2 rounded-lg hover:bg-emerald-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
             >
               {!isAdmin && <Lock className="w-3 h-3" aria-hidden="true" />}
               <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
@@ -278,7 +291,7 @@ export function AttendancePage({
               id="employee-select"
               value={selectedEmployee}
               onChange={(e) => onSelectEmployee(e.target.value)}
-              className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-base font-medium text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+              className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-base font-medium text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
             >
               {employees.map((name) => (
                 <option key={name} value={name}>
@@ -287,14 +300,14 @@ export function AttendancePage({
               ))}
             </select>
           ) : (
-            <div className="p-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="p-4 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 flex items-center justify-between gap-3">
               <span className="text-sm text-slate-600">
                 Daftar karyawan kosong. Hubungi Admin untuk menambahkan nama.
               </span>
               <button
                 type="button"
                 onClick={onOpenEmployeeModal}
-                className="min-h-[44px] px-4 rounded-xl bg-blue-700 text-white text-sm font-medium whitespace-nowrap shrink-0"
+                className="min-h-[44px] px-4 rounded-xl bg-emerald-700 text-white text-sm font-medium whitespace-nowrap shrink-0"
               >
                 Tambah Nama
               </button>
@@ -314,6 +327,7 @@ export function AttendancePage({
                   const shift = SHIFT_CONFIG[shiftKey];
                   const isSelected = selectedShift === shiftKey;
                   const ShiftIcon = shiftKey === 'pagi' ? Sun : Sunset;
+                  const cutoff = getGraceCutoffLabel(shiftKey, graceMinutes);
 
                   return (
                     <button
@@ -321,16 +335,18 @@ export function AttendancePage({
                       type="button"
                       onClick={() => onSelectShift(shiftKey)}
                       aria-pressed={isSelected}
-                      className={`min-h-[68px] p-4 rounded-xl border text-left transition-colors flex items-start gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                      className={`min-h-[68px] p-4 rounded-xl border text-left transition-colors flex items-start gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
                         isSelected
-                          ? 'border-blue-700 bg-blue-50/80 text-blue-950'
-                          : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 text-slate-800'
+                          ? 'border-emerald-700 bg-emerald-50/90 text-emerald-950'
+                          : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/30 text-slate-800'
                       }`}
                     >
                       <span
                         className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
                           isSelected
-                            ? 'bg-blue-700 text-white'
+                            ? shiftKey === 'pagi'
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-emerald-700 text-white'
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -344,7 +360,7 @@ export function AttendancePage({
                           {shift.timeRange}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          Batas tepat waktu {shift.graceCutoffLabel}
+                          Batas tepat waktu {cutoff}
                         </div>
                       </div>
                     </button>
@@ -369,21 +385,21 @@ export function AttendancePage({
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={160}
                 placeholder="Contoh: izin telat karena hujan, tukar shift, atau keterangan pulang..."
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 resize-none focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 resize-none focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
               />
             </div>
 
             {/* Contextual Employee Status Hint */}
             {hasEmployees && (
-              <div className="px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-700 flex items-start gap-2.5">
+              <div className="px-4 py-3 rounded-xl bg-emerald-50/70 border border-emerald-200/70 text-xs sm:text-sm text-slate-700 flex items-start gap-2.5">
                 {selectedEmployeeOpenLog ? (
                   <>
                     <Clock
-                      className="w-4 h-4 text-blue-700 shrink-0 mt-0.5"
+                      className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5"
                       aria-hidden="true"
                     />
                     <span>
-                      <strong className="font-semibold text-slate-900">
+                      <strong className="font-semibold text-emerald-950">
                         {selectedEmployee}
                       </strong>{' '}
                       sudah Check-In{' '}
@@ -402,7 +418,7 @@ export function AttendancePage({
                       aria-hidden="true"
                     />
                     <span>
-                      <strong className="font-semibold text-slate-900">
+                      <strong className="font-semibold text-emerald-950">
                         {selectedEmployee}
                       </strong>{' '}
                       telah menyelesaikan{' '}
@@ -421,15 +437,15 @@ export function AttendancePage({
                 ) : selectedEmployeeTodayLeave ? (
                   <>
                     <FileText
-                      className="w-4 h-4 text-blue-700 shrink-0 mt-0.5"
+                      className="w-4 h-4 text-teal-700 shrink-0 mt-0.5"
                       aria-hidden="true"
                     />
                     <span>
-                      <strong className="font-semibold text-slate-900">
+                      <strong className="font-semibold text-emerald-950">
                         {selectedEmployee}
                       </strong>{' '}
                       tercatat{' '}
-                      <strong className="font-semibold text-blue-800">
+                      <strong className="font-semibold text-teal-800">
                         {selectedEmployeeTodayLeave.status}
                       </strong>{' '}
                       hari ini (
@@ -447,7 +463,7 @@ export function AttendancePage({
                       aria-hidden="true"
                     />
                     <span>
-                      <strong className="font-semibold text-slate-900">
+                      <strong className="font-semibold text-emerald-950">
                         {selectedEmployee}
                       </strong>{' '}
                       belum mencatat absensi {SHIFT_CONFIG[selectedShift].label}{' '}
@@ -462,16 +478,16 @@ export function AttendancePage({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
               <button
                 type="button"
-                disabled={!hasEmployees}
+                disabled={!hasEmployees || isSubmitting}
                 onClick={handleCheckInClick}
-                className="min-h-[64px] px-5 py-3.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-slate-200 disabled:text-slate-400 text-white transition-all active:scale-[0.99] flex items-center justify-center gap-3 shadow-sm shadow-blue-900/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                className="min-h-[64px] px-5 py-3.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 disabled:text-slate-400 text-white transition-all active:scale-[0.99] flex items-center justify-center gap-3 shadow-sm shadow-emerald-900/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
               >
                 <LogIn className="w-5 h-5 shrink-0" aria-hidden="true" />
                 <div className="text-left">
                   <div className="text-base font-bold leading-tight">
                     Check-In (Masuk)
                   </div>
-                  <div className="font-mono tabular-nums text-xs text-blue-100 mt-0.5">
+                  <div className="font-mono tabular-nums text-xs text-emerald-100 mt-0.5">
                     Catat waktu · {currentHHMM}
                   </div>
                 </div>
@@ -479,16 +495,16 @@ export function AttendancePage({
 
               <button
                 type="button"
-                disabled={!hasEmployees}
+                disabled={!hasEmployees || isSubmitting}
                 onClick={handleCheckOutClick}
-                className="min-h-[64px] px-5 py-3.5 rounded-xl bg-white border-2 border-blue-700 hover:bg-blue-50 disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50 text-blue-800 transition-all active:scale-[0.99] flex items-center justify-center gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                className="min-h-[64px] px-5 py-3.5 rounded-xl bg-white border-2 border-emerald-700 hover:bg-emerald-50 disabled:border-slate-200 disabled:text-slate-400 disabled:bg-slate-50 text-emerald-800 transition-all active:scale-[0.99] flex items-center justify-center gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
               >
                 <LogOut className="w-5 h-5 shrink-0" aria-hidden="true" />
                 <div className="text-left">
                   <div className="text-base font-bold leading-tight">
                     Check-Out (Pulang)
                   </div>
-                  <div className="font-mono tabular-nums text-xs text-blue-600 mt-0.5">
+                  <div className="font-mono tabular-nums text-xs text-emerald-700 mt-0.5">
                     Catat waktu · {currentHHMM}
                   </div>
                 </div>
@@ -511,10 +527,10 @@ export function AttendancePage({
                       type="button"
                       onClick={() => setLeaveType(type)}
                       aria-pressed={isSelected}
-                      className={`min-h-[60px] p-4 rounded-xl border text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                      className={`min-h-[60px] p-4 rounded-xl border text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
                         isSelected
-                          ? 'border-blue-700 bg-blue-50/80 text-blue-950'
-                          : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 text-slate-800'
+                          ? 'border-emerald-700 bg-emerald-50/90 text-emerald-950'
+                          : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/30 text-slate-800'
                       }`}
                     >
                       <div className="text-sm font-bold">{type}</div>
@@ -544,7 +560,7 @@ export function AttendancePage({
                   required
                   value={leaveStartDate}
                   onChange={(e) => handleStartDateChange(e.target.value)}
-                  className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                  className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                 />
               </div>
 
@@ -562,7 +578,7 @@ export function AttendancePage({
                   min={leaveStartDate}
                   value={leaveEndDate}
                   onChange={(e) => setLeaveEndDate(e.target.value)}
-                  className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                  className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                 />
               </div>
             </div>
@@ -579,7 +595,7 @@ export function AttendancePage({
                 id="leave-shift"
                 value={leaveShift}
                 onChange={(e) => setLeaveShift(e.target.value as LogShiftId)}
-                className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                className="w-full min-h-[48px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
               >
                 <option value="seharian">
                   Seharian (Full Day · 09:00 - 21:00)
@@ -597,7 +613,7 @@ export function AttendancePage({
               >
                 Alasan / Keterangan{' '}
                 {leaveType === 'Ijin' ? (
-                  <span className="text-blue-700 font-medium">*</span>
+                  <span className="text-emerald-700 font-medium">*</span>
                 ) : (
                   <span className="font-normal text-slate-500">(Opsional)</span>
                 )}
@@ -614,17 +630,21 @@ export function AttendancePage({
                     ? 'Tuliskan alasan ijin, misal: sakit demam atau acara keluarga...'
                     : 'Contoh: jadwal libur mingguan atau tukar hari libur...'
                 }
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 resize-none focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 resize-none focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
               />
             </div>
 
             <button
               type="submit"
-              disabled={!hasEmployees}
-              className="w-full min-h-[56px] px-5 py-3.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-slate-200 disabled:text-slate-400 text-white text-base font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2.5 shadow-sm shadow-blue-900/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+              disabled={!hasEmployees || isSubmitting}
+              className="w-full min-h-[56px] px-5 py-3.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 disabled:text-slate-400 text-white text-base font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2.5 shadow-sm shadow-emerald-900/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
             >
               <Send className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Kirim Pengajuan {leaveType}</span>
+              <span>
+                {isSubmitting
+                  ? 'Menyimpan...'
+                  : `Kirim Pengajuan ${leaveType}`}
+              </span>
             </button>
           </form>
         )}
@@ -635,11 +655,11 @@ export function AttendancePage({
         aria-label={
           isAdmin ? 'Ringkasan absensi hari ini' : 'Status karyawan hari ini'
         }
-        className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-5 sm:p-7 space-y-5"
+        className="lg:col-span-5 bg-white border border-emerald-200/80 shadow-sm shadow-emerald-950/5 rounded-2xl p-5 sm:p-7 space-y-5"
       >
-        <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-200">
+        <div className="flex items-start justify-between gap-3 pb-4 border-b border-emerald-100">
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900">
+            <h2 className="text-base sm:text-lg font-bold text-emerald-950">
               {isAdmin
                 ? 'Catatan Hari Ini (Semua)'
                 : `Status ${selectedEmployee || 'Karyawan'} Hari Ini`}
@@ -650,7 +670,7 @@ export function AttendancePage({
               </span>
               <span aria-hidden="true">·</span>
               <span>
-                {isAdmin ? 'Mode Admin aktif' : 'Laporan penuh dikunci'}
+                {isAdmin ? 'Sinkron real-time aktif' : 'Tersinkron otomatis'}
               </span>
             </div>
           </div>
@@ -658,7 +678,7 @@ export function AttendancePage({
           <button
             type="button"
             onClick={onNavigateToLog}
-            className="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-semibold text-blue-700 hover:bg-blue-50 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            className="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
           >
             {!isAdmin && <Lock className="w-3.5 h-3.5" aria-hidden="true" />}
             <span>{isAdmin ? 'Lihat Laporan' : 'Laporan Admin'}</span>
@@ -671,7 +691,7 @@ export function AttendancePage({
         {visibleSnapshotLogs.length === 0 ? (
           <div className="py-10 text-center space-y-2">
             <Clock
-              className="w-8 h-8 text-slate-300 mx-auto"
+              className="w-8 h-8 text-emerald-200 mx-auto"
               aria-hidden="true"
             />
             <p className="text-sm font-medium text-slate-700">
@@ -686,7 +706,7 @@ export function AttendancePage({
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-emerald-100/70">
             {visibleSnapshotLogs.slice(0, 6).map((item) => {
               const isLate = item.status === 'Terlambat';
               const isLeave =
@@ -725,9 +745,9 @@ export function AttendancePage({
                       item.status === 'Terlambat'
                         ? 'text-amber-700'
                         : item.status === 'Ijin'
-                          ? 'text-blue-700'
+                          ? 'text-teal-700'
                           : item.status === 'Libur'
-                            ? 'text-indigo-700'
+                            ? 'text-sky-700'
                             : 'text-emerald-700'
                     }`}
                   >
@@ -746,16 +766,19 @@ export function AttendancePage({
           </ul>
         )}
 
-        <div className="pt-4 border-t border-slate-200 space-y-1.5 text-xs text-slate-500">
-          <div className="font-semibold text-slate-700">
+        <div className="pt-4 border-t border-emerald-100 space-y-1.5 text-xs text-slate-600">
+          <div className="font-semibold text-emerald-950">
             Ketentuan Jam Kerja & Laporan SIBS-Mart
           </div>
           <p className="leading-relaxed">
             Shift Pagi (<span className="font-mono tabular-nums">09:00–17:00</span>)
             dan Shift Siang (<span className="font-mono tabular-nums">13:00–21:00</span>)
             memiliki toleransi{' '}
-            <strong className="font-semibold text-slate-700">15 menit</strong>.
-            Rekap laporan lengkap hanya dapat diakses oleh Admin toko.
+            <strong className="font-semibold text-emerald-900">
+              {graceMinutes} menit
+            </strong>
+            . Seluruh data dan pengaturan tersinkron otomatis di semua
+            perangkat.
           </p>
         </div>
       </aside>

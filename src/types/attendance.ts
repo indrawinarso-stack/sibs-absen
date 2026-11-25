@@ -19,8 +19,6 @@ export interface ShiftDefinition {
   startMinute: number;
   endHour: number;
   endMinute: number;
-  graceMinutes: number;
-  graceCutoffLabel: string;
 }
 
 export const SHIFT_CONFIG: Record<ShiftId, ShiftDefinition> = {
@@ -33,8 +31,6 @@ export const SHIFT_CONFIG: Record<ShiftId, ShiftDefinition> = {
     startMinute: 0,
     endHour: 17,
     endMinute: 0,
-    graceMinutes: 15,
-    graceCutoffLabel: '09:15',
   },
   siang: {
     id: 'siang',
@@ -45,12 +41,24 @@ export const SHIFT_CONFIG: Record<ShiftId, ShiftDefinition> = {
     startMinute: 0,
     endHour: 21,
     endMinute: 0,
-    graceMinutes: 15,
-    graceCutoffLabel: '13:15',
   },
 };
 
 export const DEFAULT_EMPLOYEES: string[] = ['Risa', 'Zulfa'];
+export const DEFAULT_GRACE_MINUTES = 15;
+export const DEFAULT_STORE_NAME = 'SIBS-Mart';
+
+export interface EmployeeItem {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface StoreSettings {
+  storeName: string;
+  adminPinHash: string;
+  graceMinutes: number;
+}
 
 export interface AttendanceLog {
   id: string;

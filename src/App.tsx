@@ -10,16 +10,35 @@ import { ChangePinModal } from './components/ChangePinModal';
 import { EmployeeModal } from './components/EmployeeModal';
 import { Header } from './components/Header';
 import {
+  checkOutAttendanceLogDoc,
+  createAttendanceLogDoc,
+  createEmployeeDoc,
+  deleteAttendanceLogDoc,
+  deleteEmployeeDoc,
+  initializeCloudStoreIfNeeded,
+  subscribeAttendanceLogs,
+  subscribeEmployees,
+  subscribeStoreSettings,
+  updateStoreSettingsDoc,
+} from './services/firestoreSync';
+import {
   AppTab,
   AttendanceLog,
+  DEFAULT_GRACE_MINUTES,
+  DEFAULT_STORE_NAME,
+  EmployeeItem,
   SHIFT_CONFIG,
   ShiftId,
+  StoreSettings,
 } from './types/attendance';
 import {
-  changeAdminPin,
-  isUsingDefaultAdminPin,
+  getCachedPinHash,
+  getDefaultPinHash,
+  hashPin,
+  isHashDefaultAdminPin,
   loadAdminSession,
   saveAdminSession,
+  saveCachedPinHash,
   verifyAdminPin,
 } from './utils/adminAuth';
 import {
@@ -28,8 +47,10 @@ import {
   getDatesInRange,
   getLocalDateString,
   loadAttendanceLogs,
-  loadEmployees,
+  loadCachedEmployeeItems,
+  loadCachedSettings,
   saveAttendanceLogs,
+  saveCachedSettings,
   saveEmployees,
 } from './utils/attendance';
 
@@ -46,27 +67,39 @@ function getDefaultShift(date: Date): ShiftId {
   return totalMinutes >= 11 * 60 + 30 ? 'siang' : 'pagi';
 }
 
-function generateLogId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
 export default function App() {
   const [now, setNow] = useState<Date>(() => new Date());
   const [activeTab, setActiveTab] = useState<AppTab>('absensi');
   const [isAdmin, setIsAdmin] = useState<boolean>(() => loadAdminSession());
   const [isUsingDefaultPin, setIsUsingDefaultPin] = useState<boolean>(false);
 
-  const [employees, setEmployees] = useState<string[]>(() => loadEmployees());
+  const [employeeItems, setEmployeeItems] = useState<EmployeeItem[]>(() =>
+    loadCachedEmployeeItems()
+  );
   const [logs, setLogs] = useState<AttendanceLog[]>(() =>
     loadAttendanceLogs()
   );
+  const [storeSettings, setStoreSettings] = useState<StoreSettings>(() => {
+    const cached = loadCachedSettings();
+    return {
+      storeName: cached.storeName || DEFAULT_STORE_NAME,
+      adminPinHash: cached.adminPinHash || getCachedPinHash() || '',
+      graceMinutes:
+        typeof cached.graceMinutes === 'number'
+          ? cached.graceMinutes
+          : DEFAULT_GRACE_MINUTES,
+    };
+  });
+  const [syncError, setSyncError] = useState<Error | null>(null);
+
+  const employees = useMemo(
+    () => employeeItems.map((e) => e.name),
+    [employeeItems]
+  );
 
   const [selectedEmployee, setSelectedEmployee] = useState<string>(() => {
-    const initial = loadEmployees();
-    return initial[0] ?? '';
+    const initial = loadCachedEmployeeItems();
+    return initial[0]?.name ?? '';
   });
   const [selectedShift, setSelectedShift] = useState<ShiftId>(() =>
     getDefaultShift(new Date())
@@ -79,6 +112,10 @@ export default function App() {
     useState<PendingAdminAction>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
+  if (syncError) {
+    throw syncError;
+  }
+
   // Live clock tick every 1 second
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -87,20 +124,71 @@ export default function App() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  // Check if default PIN is still in use whenever admin logs in
+  // Initialize and subscribe to Firestore real-time updates across all devices
+  useEffect(() => {
+    let active = true;
+    void initializeCloudStoreIfNeeded().catch((err) => {
+      console.error('Failed to initialize cloud store:', err);
+    });
+
+    const unsubEmployees = subscribeEmployees(
+      (items) => {
+        if (!active) return;
+        setEmployeeItems(items);
+        saveEmployees(items.map((i) => i.name));
+      },
+      (err) => {
+        if (active) setSyncError(err);
+      }
+    );
+
+    const unsubLogs = subscribeAttendanceLogs(
+      (items) => {
+        if (!active) return;
+        setLogs(items);
+        saveAttendanceLogs(items);
+      },
+      (err) => {
+        if (active) setSyncError(err);
+      }
+    );
+
+    const unsubSettings = subscribeStoreSettings(
+      (settings) => {
+        if (!active || !settings) return;
+        setStoreSettings(settings);
+        saveCachedSettings(settings);
+        if (settings.adminPinHash) {
+          saveCachedPinHash(settings.adminPinHash);
+        }
+      },
+      (err) => {
+        if (active) setSyncError(err);
+      }
+    );
+
+    return () => {
+      active = false;
+      unsubEmployees();
+      unsubLogs();
+      unsubSettings();
+    };
+  }, []);
+
+  // Check if default PIN is still in use whenever admin logs in or settings change
   useEffect(() => {
     if (!isAdmin) {
       setIsUsingDefaultPin(false);
       return;
     }
     let mounted = true;
-    isUsingDefaultAdminPin().then((result) => {
+    void isHashDefaultAdminPin(storeSettings.adminPinHash).then((result) => {
       if (mounted) setIsUsingDefaultPin(result);
     });
     return () => {
       mounted = false;
     };
-  }, [isAdmin]);
+  }, [isAdmin, storeSettings.adminPinHash]);
 
   // Auto-dismiss toast after 4 seconds
   useEffect(() => {
@@ -137,7 +225,7 @@ export default function App() {
   );
 
   const handleVerifyAdminPin = async (pin: string): Promise<boolean> => {
-    const valid = await verifyAdminPin(pin);
+    const valid = await verifyAdminPin(pin, storeSettings.adminPinHash);
     if (!valid) return false;
 
     setIsAdmin(true);
@@ -150,7 +238,7 @@ export default function App() {
       setActiveTab('log');
     }
     setPendingAdminAction(null);
-    notify('Mode Admin aktif. Akses laporan dan kelola karyawan dibuka.');
+    notify('Mode Admin aktif. Akses laporan dan pengaturan dibuka.');
     return true;
   };
 
@@ -180,18 +268,45 @@ export default function App() {
     setIsAdminLoginModalOpen(true);
   };
 
-  const handleChangePin = async (currentPin: string, newPin: string) => {
-    const result = await changeAdminPin(currentPin, newPin);
-    if (result.ok) {
-      setIsUsingDefaultPin(await isUsingDefaultAdminPin());
-      notify('PIN Admin berhasil diperbarui.');
+  const handleSaveStoreSettings = async (payload: {
+    graceMinutes: number;
+    currentPin?: string;
+    newPin?: string;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    let nextPinHash =
+      storeSettings.adminPinHash || (await getDefaultPinHash());
+
+    if (payload.newPin && payload.currentPin !== undefined) {
+      const validCurrent = await verifyAdminPin(
+        payload.currentPin,
+        storeSettings.adminPinHash
+      );
+      if (!validCurrent) {
+        return { ok: false, error: 'PIN Admin saat ini tidak sesuai.' };
+      }
+      nextPinHash = await hashPin(payload.newPin.trim());
     }
-    return result;
+
+    const updatedSettings: StoreSettings = {
+      storeName: storeSettings.storeName || DEFAULT_STORE_NAME,
+      adminPinHash: nextPinHash,
+      graceMinutes: payload.graceMinutes,
+    };
+
+    try {
+      await updateStoreSettingsDoc(updatedSettings);
+      notify(
+        'Pengaturan toko & PIN berhasil disimpan dan tersinkron ke semua perangkat.'
+      );
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Gagal menyinkronkan pengaturan ke server.' };
+    }
   };
 
-  const handleAddEmployee = (
+  const handleAddEmployee = async (
     rawName: string
-  ): { ok: boolean; error?: string } => {
+  ): Promise<{ ok: boolean; error?: string }> => {
     if (!isAdmin) {
       return { ok: false, error: 'Hanya Admin yang dapat menambah karyawan.' };
     }
@@ -206,23 +321,27 @@ export default function App() {
       return { ok: false, error: `Nama "${trimmed}" sudah ada di daftar.` };
     }
 
-    const updated = [...employees, trimmed];
-    setEmployees(updated);
-    saveEmployees(updated);
-    setSelectedEmployee(trimmed);
-    notify(`Karyawan "${trimmed}" ditambahkan ke daftar.`);
-    return { ok: true };
+    try {
+      await createEmployeeDoc(trimmed);
+      setSelectedEmployee(trimmed);
+      notify(`Karyawan "${trimmed}" ditambahkan dan tersinkron ke semua perangkat.`);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Gagal menyimpan karyawan ke database.' };
+    }
   };
 
-  const handleRemoveEmployee = (nameToRemove: string) => {
+  const handleRemoveEmployee = async (employee: EmployeeItem): Promise<void> => {
     if (!isAdmin) return;
-    const updated = employees.filter((name) => name !== nameToRemove);
-    setEmployees(updated);
-    saveEmployees(updated);
-    notify(`Karyawan "${nameToRemove}" dihapus dari daftar.`, 'info');
+    try {
+      await deleteEmployeeDoc(employee.id);
+      notify(`Karyawan "${employee.name}" dihapus dari daftar.`, 'info');
+    } catch {
+      notify('Gagal menghapus karyawan dari database.', 'warning');
+    }
   };
 
-  const handleCheckIn = (rawNote: string): boolean => {
+  const handleCheckIn = async (rawNote: string): Promise<boolean> => {
     if (!selectedEmployee) {
       notify('Pilih atau tambahkan nama karyawan terlebih dahulu.', 'warning');
       return false;
@@ -260,34 +379,34 @@ export default function App() {
 
     const { status, lateMinutes } = calculateCheckInStatus(
       currentNow,
-      selectedShift
+      selectedShift,
+      storeSettings.graceMinutes
     );
 
-    const newRecord: AttendanceLog = {
-      id: generateLogId(),
-      date: dateStr,
-      employeeName: selectedEmployee,
-      shift: selectedShift,
-      checkInTime: timeHHMM,
-      checkOutTime: null,
-      status,
-      lateMinutes,
-      note: rawNote.trim(),
-      createdAt: currentNow.getTime(),
-    };
+    try {
+      await createAttendanceLogDoc({
+        date: dateStr,
+        employeeName: selectedEmployee,
+        shift: selectedShift,
+        checkInTime: timeHHMM,
+        checkOutTime: null,
+        status,
+        lateMinutes,
+        note: rawNote.trim(),
+      });
 
-    const updatedLogs = [newRecord, ...logs];
-    setLogs(updatedLogs);
-    saveAttendanceLogs(updatedLogs);
-
-    notify(
-      `Check-In ${selectedEmployee} (${shiftInfo.shortLabel}) pukul ${timeHHMM} · ${status}`,
-      status === 'Terlambat' ? 'info' : 'success'
-    );
-    return true;
+      notify(
+        `Check-In ${selectedEmployee} (${shiftInfo.shortLabel}) pukul ${timeHHMM} · ${status}`,
+        status === 'Terlambat' ? 'info' : 'success'
+      );
+      return true;
+    } catch {
+      notify('Gagal mengirim Check-In. Periksa koneksi internet.', 'warning');
+      return false;
+    }
   };
 
-  const handleCheckOut = (rawNote: string): boolean => {
+  const handleCheckOut = async (rawNote: string): Promise<boolean> => {
     if (!selectedEmployee) {
       notify('Pilih nama karyawan terlebih dahulu.', 'warning');
       return false;
@@ -340,28 +459,26 @@ export default function App() {
     }
 
     const trimmedNote = rawNote.trim();
-    const updatedLogs = logs.map((log) => {
-      if (log.id !== openLog.id) return log;
-      let mergedNote = log.note;
-      if (trimmedNote) {
-        mergedNote = log.note
-          ? `${log.note} | Pulang: ${trimmedNote}`
-          : trimmedNote;
-      }
-      return {
-        ...log,
-        checkOutTime: timeHHMM,
-        note: mergedNote,
-      };
-    });
+    let mergedNote = openLog.note;
+    if (trimmedNote) {
+      mergedNote = openLog.note
+        ? `${openLog.note} | Pulang: ${trimmedNote}`
+        : trimmedNote;
+    }
 
-    setLogs(updatedLogs);
-    saveAttendanceLogs(updatedLogs);
-    notify(`Check-Out ${selectedEmployee} tercatat pukul ${timeHHMM}.`);
-    return true;
+    try {
+      await checkOutAttendanceLogDoc(openLog.id, timeHHMM, mergedNote);
+      notify(`Check-Out ${selectedEmployee} tercatat pukul ${timeHHMM}.`);
+      return true;
+    } catch {
+      notify('Gagal mengirim Check-Out. Periksa koneksi internet.', 'warning');
+      return false;
+    }
   };
 
-  const handleSubmitLeave = (payload: LeaveSubmissionPayload): boolean => {
+  const handleSubmitLeave = async (
+    payload: LeaveSubmissionPayload
+  ): Promise<boolean> => {
     if (!selectedEmployee) {
       notify('Pilih atau tambahkan nama karyawan terlebih dahulu.', 'warning');
       return false;
@@ -382,11 +499,10 @@ export default function App() {
       return false;
     }
 
-    const baseTime = Date.now();
-    const newRecords: AttendanceLog[] = [];
+    const validDates: string[] = [];
     let skippedCount = 0;
 
-    dates.forEach((dateStr, idx) => {
+    for (const dateStr of dates) {
       const conflict = logs.some(
         (log) =>
           log.date === dateStr &&
@@ -395,29 +511,14 @@ export default function App() {
             log.shift === 'seharian' ||
             log.shift === payload.shift)
       );
-
       if (conflict) {
         skippedCount += 1;
-        return;
+      } else {
+        validDates.push(dateStr);
       }
+    }
 
-      newRecords.push({
-        id: generateLogId(),
-        date: dateStr,
-        employeeName: selectedEmployee,
-        shift: payload.shift,
-        checkInTime: null,
-        checkOutTime: null,
-        status: payload.leaveType,
-        lateMinutes: 0,
-        note:
-          trimmedNote ||
-          (payload.leaveType === 'Libur' ? 'Jadwal libur' : 'Ijin'),
-        createdAt: baseTime + idx,
-      });
-    });
-
-    if (newRecords.length === 0) {
+    if (validDates.length === 0) {
       notify(
         `${selectedEmployee} sudah memiliki catatan absensi/ijin/libur pada tanggal yang dipilih.`,
         'warning'
@@ -425,30 +526,50 @@ export default function App() {
       return false;
     }
 
-    const updatedLogs = [...newRecords.reverse(), ...logs];
-    setLogs(updatedLogs);
-    saveAttendanceLogs(updatedLogs);
+    try {
+      await Promise.all(
+        validDates.map((dateStr) =>
+          createAttendanceLogDoc({
+            date: dateStr,
+            employeeName: selectedEmployee,
+            shift: payload.shift,
+            checkInTime: null,
+            checkOutTime: null,
+            status: payload.leaveType,
+            lateMinutes: 0,
+            note:
+              trimmedNote ||
+              (payload.leaveType === 'Libur' ? 'Jadwal libur' : 'Ijin'),
+          })
+        )
+      );
 
-    const skippedText =
-      skippedCount > 0
-        ? ` (${skippedCount} tanggal dilewati karena sudah ada data)`
-        : '';
-    notify(
-      `Pengajuan ${payload.leaveType} ${selectedEmployee} untuk ${newRecords.length} hari tercatat ke laporan.${skippedText}`
-    );
-    return true;
+      const skippedText =
+        skippedCount > 0
+          ? ` (${skippedCount} tanggal dilewati karena sudah ada data)`
+          : '';
+      notify(
+        `Pengajuan ${payload.leaveType} ${selectedEmployee} untuk ${validDates.length} hari tercatat ke laporan.${skippedText}`
+      );
+      return true;
+    } catch {
+      notify('Gagal mengirim pengajuan. Periksa koneksi internet.', 'warning');
+      return false;
+    }
   };
 
-  const handleDeleteLog = (id: string) => {
+  const handleDeleteLog = async (id: string): Promise<void> => {
     if (!isAdmin) return;
-    const updatedLogs = logs.filter((log) => log.id !== id);
-    setLogs(updatedLogs);
-    saveAttendanceLogs(updatedLogs);
-    notify('Catatan absensi dihapus.', 'info');
+    try {
+      await deleteAttendanceLogDoc(id);
+      notify('Catatan absensi dihapus.', 'info');
+    } catch {
+      notify('Gagal menghapus catatan absensi.', 'warning');
+    }
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-emerald-50 via-teal-50/40 to-green-50 text-slate-900">
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -463,6 +584,7 @@ export default function App() {
           <AttendancePage
             now={now}
             isAdmin={isAdmin}
+            graceMinutes={storeSettings.graceMinutes}
             employees={employees}
             selectedEmployee={selectedEmployee}
             onSelectEmployee={setSelectedEmployee}
@@ -490,7 +612,7 @@ export default function App() {
         ) : (
           <section
             aria-label="Gerbang akses laporan admin"
-            className="max-w-md mx-auto mt-4 sm:mt-10 bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs"
+            className="max-w-md mx-auto mt-4 sm:mt-10 bg-white border border-emerald-200/80 rounded-2xl p-6 sm:p-8 shadow-sm shadow-emerald-950/5"
           >
             <AdminLoginForm
               onSubmitPin={handleVerifyAdminPin}
@@ -501,7 +623,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('absensi')}
-              className="w-full min-h-[44px] mt-3 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+              className="w-full min-h-[44px] mt-3 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium text-slate-600 hover:text-emerald-950 hover:bg-emerald-50 transition-colors"
             >
               Kembali ke Halaman Absensi
             </button>
@@ -509,10 +631,10 @@ export default function App() {
         )}
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+      <footer className="border-t border-emerald-200/80 bg-white/80 backdrop-blur-xs">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
           <span>SIBS-Mart · Mini Market Pesantren Situwangi</span>
-          <span>Data absensi tersimpan otomatis di Local Storage browser</span>
+          <span>Data & pengaturan tersinkron otomatis lintas perangkat</span>
         </div>
       </footer>
 
@@ -534,7 +656,7 @@ export default function App() {
         <>
           <EmployeeModal
             isOpen={isEmployeeModalOpen}
-            employees={employees}
+            employees={employeeItems}
             onClose={() => setIsEmployeeModalOpen(false)}
             onAddEmployee={handleAddEmployee}
             onRemoveEmployee={handleRemoveEmployee}
@@ -542,8 +664,9 @@ export default function App() {
 
           <ChangePinModal
             isOpen={isChangePinModalOpen}
+            currentGraceMinutes={storeSettings.graceMinutes}
             onClose={() => setIsChangePinModalOpen(false)}
-            onChangePin={handleChangePin}
+            onSaveSettings={handleSaveStoreSettings}
           />
         </>
       )}
@@ -560,7 +683,7 @@ export default function App() {
               toast.type === 'warning'
                 ? 'border-amber-300 text-amber-950'
                 : toast.type === 'info'
-                  ? 'border-blue-200 text-slate-900'
+                  ? 'border-teal-200 text-slate-900'
                   : 'border-emerald-300 text-slate-900'
             }`}
           >
@@ -571,7 +694,7 @@ export default function App() {
               />
             ) : toast.type === 'info' ? (
               <Info
-                className="w-5 h-5 text-blue-700 shrink-0 mt-0.5"
+                className="w-5 h-5 text-teal-700 shrink-0 mt-0.5"
                 aria-hidden="true"
               />
             ) : (
