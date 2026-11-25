@@ -15,6 +15,7 @@ import {
   createEmployeeDoc,
   deleteAttendanceLogDoc,
   deleteEmployeeDoc,
+  fetchCloudSnapshotFromServer,
   initializeCloudStoreIfNeeded,
   subscribeAttendanceLogs,
   subscribeEmployees,
@@ -49,6 +50,7 @@ import {
   loadAttendanceLogs,
   loadCachedEmployeeItems,
   loadCachedSettings,
+  loadEmployees,
   saveAttendanceLogs,
   saveCachedSettings,
   saveEmployees,
@@ -67,9 +69,21 @@ function getDefaultShift(date: Date): ShiftId {
   return totalMinutes >= 11 * 60 + 30 ? 'siang' : 'pagi';
 }
 
+function getInitialTabFromUrl(): AppTab {
+  if (typeof window === 'undefined') return 'absensi';
+  const hash = window.location.hash.toLowerCase();
+  const params = new URLSearchParams(window.location.search);
+  if (hash === '#laporan' || params.get('tab') === 'laporan') {
+    return 'log';
+  }
+  return 'absensi';
+}
+
 export default function App() {
   const [now, setNow] = useState<Date>(() => new Date());
-  const [activeTab, setActiveTab] = useState<AppTab>('absensi');
+  const [activeTab, setActiveTab] = useState<AppTab>(() =>
+    getInitialTabFromUrl()
+  );
   const [isAdmin, setIsAdmin] = useState<boolean>(() => loadAdminSession());
   const [isUsingDefaultPin, setIsUsingDefaultPin] = useState<boolean>(false);
 
@@ -91,6 +105,8 @@ export default function App() {
     };
   });
   const [syncError, setSyncError] = useState<Error | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const employees = useMemo(
     () => employeeItems.map((e) => e.name),
@@ -127,7 +143,13 @@ export default function App() {
   // Initialize and subscribe to Firestore real-time updates across all devices
   useEffect(() => {
     let active = true;
-    void initializeCloudStoreIfNeeded().catch((err) => {
+    const preSyncLocalEmployees = loadEmployees();
+    const preSyncLocalLogs = loadAttendanceLogs();
+
+    void initializeCloudStoreIfNeeded(
+      preSyncLocalEmployees,
+      preSyncLocalLogs
+    ).catch((err) => {
       console.error('Failed to initialize cloud store:', err);
     });
 
@@ -136,6 +158,7 @@ export default function App() {
         if (!active) return;
         setEmployeeItems(items);
         saveEmployees(items.map((i) => i.name));
+        setLastSyncedAt(new Date());
       },
       (err) => {
         if (active) setSyncError(err);
@@ -147,6 +170,7 @@ export default function App() {
         if (!active) return;
         setLogs(items);
         saveAttendanceLogs(items);
+        setLastSyncedAt(new Date());
       },
       (err) => {
         if (active) setSyncError(err);
@@ -161,6 +185,7 @@ export default function App() {
         if (settings.adminPinHash) {
           saveCachedPinHash(settings.adminPinHash);
         }
+        setLastSyncedAt(new Date());
       },
       (err) => {
         if (active) setSyncError(err);
@@ -173,6 +198,17 @@ export default function App() {
       unsubLogs();
       unsubSettings();
     };
+  }, []);
+
+  // Support #laporan direct URL on admin's phone or tablet
+  useEffect(() => {
+    const handleHashChange = () => {
+      if (window.location.hash.toLowerCase() === '#laporan') {
+        setActiveTab('log');
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   // Check if default PIN is still in use whenever admin logs in or settings change
@@ -206,6 +242,61 @@ export default function App() {
     []
   );
 
+  const handleRefreshSync = useCallback(
+    async (showToast: boolean = true) => {
+      setIsSyncing(true);
+      try {
+        const snapshot = await fetchCloudSnapshotFromServer();
+        setEmployeeItems(snapshot.employees);
+        saveEmployees(snapshot.employees.map((i) => i.name));
+        setLogs(snapshot.logs);
+        saveAttendanceLogs(snapshot.logs);
+        if (snapshot.settings) {
+          setStoreSettings(snapshot.settings);
+          saveCachedSettings(snapshot.settings);
+          if (snapshot.settings.adminPinHash) {
+            saveCachedPinHash(snapshot.settings.adminPinHash);
+          }
+        }
+        setLastSyncedAt(new Date());
+        if (showToast) {
+          notify('Laporan berhasil disinkronkan dari server.');
+        }
+      } catch {
+        if (showToast) {
+          notify(
+            'Gagal menyinkronkan laporan. Periksa koneksi internet.',
+            'warning'
+          );
+        }
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [notify]
+  );
+
+  // Refresh from server automatically when admin switches back to mobile/tablet browser or reconnects
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'log') return;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void handleRefreshSync(false);
+      }
+    };
+    const handleOnline = () => {
+      void handleRefreshSync(false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [isAdmin, activeTab, handleRefreshSync]);
+
   // Keep selectedEmployee valid if employee list changes
   useEffect(() => {
     if (employees.length === 0) {
@@ -238,6 +329,7 @@ export default function App() {
       setActiveTab('log');
     }
     setPendingAdminAction(null);
+    void handleRefreshSync(false);
     notify('Mode Admin aktif. Akses laporan dan pengaturan dibuka.');
     return true;
   };
@@ -603,6 +695,9 @@ export default function App() {
             logs={logs}
             employees={employees}
             isUsingDefaultPin={isUsingDefaultPin}
+            lastSyncedAt={lastSyncedAt}
+            isSyncing={isSyncing}
+            onRefreshSync={() => handleRefreshSync(true)}
             onDeleteLog={handleDeleteLog}
             onNavigateToAbsensi={() => setActiveTab('absensi')}
             onOpenEmployeeModal={handleOpenEmployeeModal}

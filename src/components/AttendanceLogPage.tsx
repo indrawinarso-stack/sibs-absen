@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Download,
   FileText,
+  Link2,
+  RefreshCw,
   RotateCcw,
   Settings2,
   ShieldAlert,
@@ -23,6 +25,7 @@ import {
   exportAttendanceCsv,
   formatIndonesianMonth,
   formatIndonesianShortDate,
+  formatTimeHHMMSS,
   getLocalDateString,
   getLocalMonthString,
   getShiftDisplay,
@@ -33,6 +36,9 @@ interface AttendanceLogPageProps {
   logs: AttendanceLog[];
   employees: string[];
   isUsingDefaultPin: boolean;
+  lastSyncedAt: Date | null;
+  isSyncing: boolean;
+  onRefreshSync: () => Promise<void>;
   onDeleteLog: (id: string) => Promise<void>;
   onNavigateToAbsensi: () => void;
   onOpenEmployeeModal: () => void;
@@ -45,6 +51,9 @@ export function AttendanceLogPage({
   logs,
   employees,
   isUsingDefaultPin,
+  lastSyncedAt,
+  isSyncing,
+  onRefreshSync,
   onDeleteLog,
   onNavigateToAbsensi,
   onOpenEmployeeModal,
@@ -160,6 +169,56 @@ export function AttendanceLogPage({
     onNotify(`Berhasil mengekspor ${filteredLogs.length} baris ke ${filename}`);
   };
 
+  const employeeBreakdown = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        name: string;
+        onTime: number;
+        late: number;
+        leave: number;
+        total: number;
+      }
+    >();
+
+    for (const item of filteredLogs) {
+      const existing = map.get(item.employeeName) ?? {
+        name: item.employeeName,
+        onTime: 0,
+        late: 0,
+        leave: 0,
+        total: 0,
+      };
+      existing.total += 1;
+      if (item.status === 'Tepat Waktu') existing.onTime += 1;
+      else if (item.status === 'Terlambat') existing.late += 1;
+      else if (item.status === 'Ijin' || item.status === 'Libur') {
+        existing.leave += 1;
+      }
+      map.set(item.employeeName, existing);
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name, 'id')
+    );
+  }, [filteredLogs]);
+
+  const handleCopyAdminLink = async () => {
+    const reportUrl = `${window.location.origin}${window.location.pathname}#laporan`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(reportUrl);
+        onNotify(
+          'Tautan Laporan Admin disalin. Buka tautan ini di HP atau tablet lain untuk melihat laporan.'
+        );
+      } else {
+        onNotify(`Buka di perangkat lain: ${reportUrl}`, 'info');
+      }
+    } catch {
+      onNotify(`Buka di perangkat lain: ${reportUrl}`, 'info');
+    }
+  };
+
   const handleResetFilters = () => {
     setFilterMode('date');
     setSelectedDate(todayStr);
@@ -238,12 +297,59 @@ export function AttendanceLogPage({
           <h1 className="text-xl sm:text-2xl font-bold text-emerald-950 tracking-tight">
             Dashboard Laporan Admin
           </h1>
-          <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
-            Menampilkan data kehadiran, ijin & libur untuk {periodLabel}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:text-sm text-slate-600 mt-0.5">
+            <span>
+              Menampilkan data kehadiran, ijin & libur untuk {periodLabel}
+            </span>
+            <span className="text-emerald-300" aria-hidden="true">
+              •
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-emerald-800 font-medium">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isSyncing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                }`}
+                aria-hidden="true"
+              />
+              {isSyncing
+                ? 'Menyinkronkan...'
+                : lastSyncedAt
+                  ? `Tersinkron · ${formatTimeHHMMSS(lastSyncedAt)}`
+                  : 'Sinkron real-time aktif'}
+            </span>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={isSyncing}
+            onClick={() => void onRefreshSync()}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 disabled:opacity-60 text-emerald-950 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            aria-label="Sinkronkan laporan terbaru dari server"
+          >
+            <RefreshCw
+              className={`w-4 h-4 text-emerald-700 shrink-0 ${
+                isSyncing ? 'animate-spin' : ''
+              }`}
+              aria-hidden="true"
+            />
+            <span>Sinkronkan</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleCopyAdminLink()}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-950 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            title="Salin link untuk membuka laporan ini di HP atau tablet lain"
+          >
+            <Link2
+              className="w-4 h-4 text-emerald-700 shrink-0"
+              aria-hidden="true"
+            />
+            <span>Salin Link</span>
+          </button>
+
           <button
             type="button"
             onClick={onOpenEmployeeModal}
@@ -318,6 +424,46 @@ export function AttendanceLogPage({
           </div>
         </div>
       </div>
+
+      {/* Per-Employee Quick Summary (especially useful on mobile/tablet) */}
+      {employeeBreakdown.length > 0 && (
+        <section
+          aria-label="Rekap per karyawan"
+          className="bg-white border border-emerald-200/80 rounded-2xl p-4 sm:p-5 space-y-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-emerald-950">
+              Rekap Per Karyawan ({periodLabel})
+            </h2>
+            <span className="text-xs text-slate-500 font-mono tabular-nums">
+              {employeeBreakdown.length} karyawan
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {employeeBreakdown.map((emp) => (
+              <div
+                key={emp.name}
+                className="rounded-xl border border-emerald-100 bg-emerald-50/40 px-3.5 py-2.5 flex items-center justify-between gap-2"
+              >
+                <span className="text-sm font-semibold text-slate-900 truncate">
+                  {emp.name}
+                </span>
+                <div className="flex items-center gap-2 text-xs font-mono tabular-nums shrink-0">
+                  <span className="text-emerald-700 font-semibold" title="Tepat Waktu">
+                    {emp.onTime} TW
+                  </span>
+                  <span className="text-amber-700 font-semibold" title="Terlambat">
+                    {emp.late} Tlb
+                  </span>
+                  <span className="text-teal-700 font-semibold" title="Ijin / Libur">
+                    {emp.leave} I/L
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Filter Toolbar */}
       <section

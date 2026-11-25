@@ -2,11 +2,15 @@ import {
   collection,
   deleteDoc,
   doc,
+  DocumentData,
   getDoc,
+  getDocFromServer,
+  getDocsFromServer,
   limit,
   onSnapshot,
   orderBy,
   query,
+  QueryDocumentSnapshot,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -25,15 +29,28 @@ import {
   StoreSettings,
 } from '../types/attendance';
 import { getCachedPinHash, getDefaultPinHash } from '../utils/adminAuth';
-import {
-  loadAttendanceLogs as loadLocalLogs,
-  loadEmployees as loadLocalEmployees,
-} from '../utils/attendance';
 
 const EMPLOYEES_COLLECTION = 'employees';
 const LOGS_COLLECTION = 'attendance_logs';
 const SETTINGS_COLLECTION = 'settings';
 const STORE_SETTINGS_DOC_ID = 'store';
+const CLOUD_MIGRATED_KEY = 'sibs_mart_cloud_migrated_v1';
+
+function markCloudMigrated(): void {
+  try {
+    localStorage.setItem(CLOUD_MIGRATED_KEY, '1');
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function isCloudMigrated(): boolean {
+  try {
+    return localStorage.getItem(CLOUD_MIGRATED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function toSafeEmployeeId(name: string, suffix?: string): string {
   const slug = name
@@ -63,85 +80,243 @@ function timestampToMs(value: unknown, fallback: number = Date.now()): number {
   return fallback;
 }
 
-export async function initializeCloudStoreIfNeeded(): Promise<void> {
+function buildEmployeesQuery() {
+  return query(
+    collection(db, EMPLOYEES_COLLECTION),
+    where('name', '>=', ''),
+    limit(200)
+  );
+}
+
+function buildLogsQuery() {
+  return query(
+    collection(db, LOGS_COLLECTION),
+    where('date', '>=', '2000-01-01'),
+    orderBy('date', 'desc'),
+    limit(2000)
+  );
+}
+
+function mapEmployeeDoc(
+  docSnap: QueryDocumentSnapshot<DocumentData>
+): EmployeeItem {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    name: typeof data.name === 'string' ? data.name : '',
+    createdAt: timestampToMs(data.createdAt, 0),
+  };
+}
+
+function sortEmployees(items: EmployeeItem[]): EmployeeItem[] {
+  return [...items].sort((a, b) => {
+    if (a.createdAt !== b.createdAt) {
+      return a.createdAt - b.createdAt;
+    }
+    return a.name.localeCompare(b.name, 'id');
+  });
+}
+
+function mapLogDoc(
+  docSnap: QueryDocumentSnapshot<DocumentData>
+): AttendanceLog {
+  const data = docSnap.data();
+  const rawIn = typeof data.checkInTime === 'string' ? data.checkInTime : '';
+  const rawOut = typeof data.checkOutTime === 'string' ? data.checkOutTime : '';
+  return {
+    id: docSnap.id,
+    date: typeof data.date === 'string' ? data.date : '',
+    employeeName:
+      typeof data.employeeName === 'string' ? data.employeeName : '',
+    shift:
+      data.shift === 'pagi' ||
+      data.shift === 'siang' ||
+      data.shift === 'seharian'
+        ? data.shift
+        : 'pagi',
+    checkInTime: rawIn || null,
+    checkOutTime: rawOut || null,
+    status:
+      data.status === 'Tepat Waktu' ||
+      data.status === 'Terlambat' ||
+      data.status === 'Ijin' ||
+      data.status === 'Libur'
+        ? data.status
+        : 'Tepat Waktu',
+    lateMinutes: typeof data.lateMinutes === 'number' ? data.lateMinutes : 0,
+    note: typeof data.note === 'string' ? data.note : '',
+    createdAt: timestampToMs(data.createdAt, 0),
+  };
+}
+
+function sortLogs(items: AttendanceLog[]): AttendanceLog[] {
+  return [...items].sort((a, b) => {
+    if (a.date !== b.date) {
+      return b.date.localeCompare(a.date);
+    }
+    return b.createdAt - a.createdAt;
+  });
+}
+
+function sanitizeLocalLogForBatch(log: AttendanceLog) {
+  const cleanedName = (log.employeeName || '').trim().slice(0, 40);
+  if (!cleanedName || !/^\d{4}-\d{2}-\d{2}$/.test(log.date || '')) {
+    return null;
+  }
+  const safeShift =
+    log.shift === 'pagi' || log.shift === 'siang' || log.shift === 'seharian'
+      ? log.shift
+      : 'pagi';
+  const safeStatus =
+    log.status === 'Tepat Waktu' ||
+    log.status === 'Terlambat' ||
+    log.status === 'Ijin' ||
+    log.status === 'Libur'
+      ? log.status
+      : 'Tepat Waktu';
+  const safeIn =
+    typeof log.checkInTime === 'string' &&
+    /^\d{2}:\d{2}$/.test(log.checkInTime)
+      ? log.checkInTime
+      : '';
+  const safeOut =
+    typeof log.checkOutTime === 'string' &&
+    /^\d{2}:\d{2}$/.test(log.checkOutTime)
+      ? log.checkOutTime
+      : '';
+
+  return {
+    id: toSafeLogId(log.id),
+    payload: {
+      date: log.date.slice(0, 10),
+      employeeName: cleanedName,
+      shift: safeShift,
+      checkInTime: safeIn,
+      checkOutTime: safeOut,
+      status: safeStatus,
+      lateMinutes: Math.max(0, Math.min(1440, Math.round(log.lateMinutes || 0))),
+      note: (log.note || '').trim().slice(0, 160),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  };
+}
+
+export async function initializeCloudStoreIfNeeded(
+  preSyncLocalEmployees: string[] = [],
+  preSyncLocalLogs: AttendanceLog[] = []
+): Promise<void> {
   const settingsPath = `${SETTINGS_COLLECTION}/${STORE_SETTINGS_DOC_ID}`;
   try {
     const settingsRef = doc(db, SETTINGS_COLLECTION, STORE_SETTINGS_DOC_ID);
     const snapshot = await getDoc(settingsRef);
 
-    if (snapshot.exists()) {
+    if (!snapshot.exists()) {
+      const initialPinHash =
+        getCachedPinHash() || (await getDefaultPinHash());
+      const batch = writeBatch(db);
+
+      batch.set(settingsRef, {
+        storeName: DEFAULT_STORE_NAME,
+        adminPinHash: initialPinHash,
+        graceMinutes: DEFAULT_GRACE_MINUTES,
+        updatedAt: serverTimestamp(),
+      });
+
+      const seedEmployees =
+        preSyncLocalEmployees.length > 0
+          ? preSyncLocalEmployees
+          : DEFAULT_EMPLOYEES;
+      seedEmployees.forEach((empName, index) => {
+        const cleaned = empName.trim().slice(0, 40);
+        if (!cleaned) return;
+        const empId = toSafeEmployeeId(cleaned, String(index + 1));
+        batch.set(doc(db, EMPLOYEES_COLLECTION, empId), {
+          name: cleaned,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      preSyncLocalLogs.slice(0, 200).forEach((log) => {
+        const sanitized = sanitizeLocalLogForBatch(log);
+        if (!sanitized) return;
+        batch.set(doc(db, LOGS_COLLECTION, sanitized.id), sanitized.payload);
+      });
+
+      await batch.commit();
+      markCloudMigrated();
       return;
     }
 
-    const initialPinHash =
-      getCachedPinHash() || (await getDefaultPinHash());
-    const batch = writeBatch(db);
+    // Settings already exist in cloud: perform a one-time merge of any local logs from pre-cloud devices
+    if (!isCloudMigrated() && preSyncLocalLogs.length > 0) {
+      const existingLogsSnap = await getDocsFromServer(buildLogsQuery());
+      const existingKeys = new Set(
+        existingLogsSnap.docs.map((d) => {
+          const item = mapLogDoc(d);
+          return `${item.date}|${item.employeeName.toLowerCase()}|${item.shift}`;
+        })
+      );
 
-    batch.set(settingsRef, {
-      storeName: DEFAULT_STORE_NAME,
-      adminPinHash: initialPinHash,
-      graceMinutes: DEFAULT_GRACE_MINUTES,
-      updatedAt: serverTimestamp(),
-    });
+      const batch = writeBatch(db);
+      let pendingOps = 0;
 
-    // Seed initial employees (migrate from localStorage if present, else Risa & Zulfa)
-    const localEmployees = loadLocalEmployees();
-    const seedEmployees =
-      localEmployees.length > 0 ? localEmployees : DEFAULT_EMPLOYEES;
-    seedEmployees.forEach((empName, index) => {
-      const cleaned = empName.trim().slice(0, 40);
-      if (!cleaned) return;
-      const empId = toSafeEmployeeId(cleaned, String(index + 1));
-      batch.set(doc(db, EMPLOYEES_COLLECTION, empId), {
-        name: cleaned,
-        createdAt: serverTimestamp(),
-      });
-    });
+      for (const log of preSyncLocalLogs.slice(0, 200)) {
+        const sanitized = sanitizeLocalLogForBatch(log);
+        if (!sanitized) continue;
+        const key = `${sanitized.payload.date}|${sanitized.payload.employeeName.toLowerCase()}|${sanitized.payload.shift}`;
+        if (existingKeys.has(key)) continue;
+        existingKeys.add(key);
+        batch.set(doc(db, LOGS_COLLECTION, sanitized.id), sanitized.payload);
+        pendingOps += 1;
+      }
 
-    // Migrate any pre-existing localStorage logs on first cloud initialization
-    const localLogs = loadLocalLogs();
-    localLogs.slice(0, 200).forEach((log) => {
-      const cleanedName = (log.employeeName || '').trim().slice(0, 40);
-      if (!cleanedName || !/^\d{4}-\d{2}-\d{2}$/.test(log.date || '')) return;
-      const safeShift =
-        log.shift === 'pagi' || log.shift === 'siang' || log.shift === 'seharian'
-          ? log.shift
-          : 'pagi';
-      const safeStatus =
-        log.status === 'Tepat Waktu' ||
-        log.status === 'Terlambat' ||
-        log.status === 'Ijin' ||
-        log.status === 'Libur'
-          ? log.status
-          : 'Tepat Waktu';
-      const safeIn =
-        typeof log.checkInTime === 'string' &&
-        /^\d{2}:\d{2}$/.test(log.checkInTime)
-          ? log.checkInTime
-          : '';
-      const safeOut =
-        typeof log.checkOutTime === 'string' &&
-        /^\d{2}:\d{2}$/.test(log.checkOutTime)
-          ? log.checkOutTime
-          : '';
-      const logId = toSafeLogId(log.id);
-      batch.set(doc(db, LOGS_COLLECTION, logId), {
-        date: log.date.slice(0, 10),
-        employeeName: cleanedName,
-        shift: safeShift,
-        checkInTime: safeIn,
-        checkOutTime: safeOut,
-        status: safeStatus,
-        lateMinutes: Math.max(0, Math.min(1440, Math.round(log.lateMinutes || 0))),
-        note: (log.note || '').trim().slice(0, 160),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    });
-
-    await batch.commit();
+      if (pendingOps > 0) {
+        await batch.commit();
+      }
+      markCloudMigrated();
+    } else if (!isCloudMigrated()) {
+      markCloudMigrated();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, settingsPath);
+  }
+}
+
+export async function fetchCloudSnapshotFromServer(): Promise<{
+  employees: EmployeeItem[];
+  logs: AttendanceLog[];
+  settings: StoreSettings | null;
+}> {
+  try {
+    const [empSnap, logSnap, settingsSnap] = await Promise.all([
+      getDocsFromServer(buildEmployeesQuery()),
+      getDocsFromServer(buildLogsQuery()),
+      getDocFromServer(doc(db, SETTINGS_COLLECTION, STORE_SETTINGS_DOC_ID)),
+    ]);
+
+    const employees = sortEmployees(empSnap.docs.map(mapEmployeeDoc));
+    const logs = sortLogs(logSnap.docs.map(mapLogDoc));
+    let settings: StoreSettings | null = null;
+    if (settingsSnap.exists()) {
+      const data = settingsSnap.data();
+      settings = {
+        storeName:
+          typeof data.storeName === 'string'
+            ? data.storeName
+            : DEFAULT_STORE_NAME,
+        adminPinHash:
+          typeof data.adminPinHash === 'string' ? data.adminPinHash : '',
+        graceMinutes:
+          typeof data.graceMinutes === 'number'
+            ? data.graceMinutes
+            : DEFAULT_GRACE_MINUTES,
+      };
+    }
+
+    return { employees, logs, settings };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, LOGS_COLLECTION);
   }
 }
 
@@ -149,28 +324,10 @@ export function subscribeEmployees(
   onData: (items: EmployeeItem[]) => void,
   onError: (error: Error) => void
 ): Unsubscribe {
-  const employeesQuery = query(
-    collection(db, EMPLOYEES_COLLECTION),
-    where('name', '>=', ''),
-    limit(200)
-  );
   return onSnapshot(
-    employeesQuery,
+    buildEmployeesQuery(),
     (snapshot) => {
-      const items: EmployeeItem[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          name: typeof data.name === 'string' ? data.name : '',
-          createdAt: timestampToMs(data.createdAt, 0),
-        };
-      });
-      items.sort((a, b) => {
-        if (a.createdAt !== b.createdAt) {
-          return a.createdAt - b.createdAt;
-        }
-        return a.name.localeCompare(b.name, 'id');
-      });
+      const items = sortEmployees(snapshot.docs.map(mapEmployeeDoc));
       onData(items);
     },
     (error) => {
@@ -187,52 +344,10 @@ export function subscribeAttendanceLogs(
   onData: (logs: AttendanceLog[]) => void,
   onError: (error: Error) => void
 ): Unsubscribe {
-  const logsQuery = query(
-    collection(db, LOGS_COLLECTION),
-    where('date', '>=', '2000-01-01'),
-    orderBy('date', 'desc'),
-    limit(2000)
-  );
   return onSnapshot(
-    logsQuery,
+    buildLogsQuery(),
     (snapshot) => {
-      const items: AttendanceLog[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        const rawIn = typeof data.checkInTime === 'string' ? data.checkInTime : '';
-        const rawOut =
-          typeof data.checkOutTime === 'string' ? data.checkOutTime : '';
-        return {
-          id: docSnap.id,
-          date: typeof data.date === 'string' ? data.date : '',
-          employeeName:
-            typeof data.employeeName === 'string' ? data.employeeName : '',
-          shift:
-            data.shift === 'pagi' ||
-            data.shift === 'siang' ||
-            data.shift === 'seharian'
-              ? data.shift
-              : 'pagi',
-          checkInTime: rawIn || null,
-          checkOutTime: rawOut || null,
-          status:
-            data.status === 'Tepat Waktu' ||
-            data.status === 'Terlambat' ||
-            data.status === 'Ijin' ||
-            data.status === 'Libur'
-              ? data.status
-              : 'Tepat Waktu',
-          lateMinutes:
-            typeof data.lateMinutes === 'number' ? data.lateMinutes : 0,
-          note: typeof data.note === 'string' ? data.note : '',
-          createdAt: timestampToMs(data.createdAt, 0),
-        };
-      });
-      items.sort((a, b) => {
-        if (a.date !== b.date) {
-          return b.date.localeCompare(a.date);
-        }
-        return b.createdAt - a.createdAt;
-      });
+      const items = sortLogs(snapshot.docs.map(mapLogDoc));
       onData(items);
     },
     (error) => {
